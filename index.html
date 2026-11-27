@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WYMov — o app por dentro</title>
+<style>
+  :root{
+    --bg:#0A0A0C; --surface:#15151A; --surface-hi:#1E1E25;
+    --on:#F5F5F2; --muted:#9A9A99; --dim:#C9C9C6; --border:rgba(255,255,255,.10);
+    --orange:#FD6802; --orange-hi:#FD8635; --lime:#BCF909; --verde:#22C55E; --amarelo:#FACC15;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; height:100%; background:var(--bg); color:var(--on);
+    font-family:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
+    overscroll-behavior:none; }
+  body{ display:flex; flex-direction:column; }
+
+  .progresso{ position:fixed; top:0; left:0; right:0; height:3px; background:rgba(255,255,255,.07); z-index:40; }
+  .progresso i{ display:block; height:100%; width:0; background:linear-gradient(90deg,var(--orange-hi),var(--orange));
+    transition:width .35s ease; }
+
+  .deck{ flex:1; display:flex; overflow-x:auto; overflow-y:hidden;
+    scroll-snap-type:x mandatory; scroll-behavior:smooth; scrollbar-width:none; }
+  .deck::-webkit-scrollbar{ display:none; }
+  .slide{ min-width:100%; width:100%; flex:none; scroll-snap-align:center; position:relative;
+    overflow-y:auto; overflow-x:hidden; padding:44px 5vw 92px; }
+  .slide::before{ content:""; position:absolute; inset:0; pointer-events:none; z-index:0;
+    background:
+      radial-gradient(760px 420px at 88% -10%, rgba(253,104,2,.16), transparent 62%),
+      radial-gradient(620px 420px at -6% 104%, rgba(188,249,9,.055), transparent 60%); }
+  .dentro{ position:relative; z-index:1; max-width:1080px; margin:0 auto; min-height:100%;
+    display:grid; grid-template-columns:1fr auto; gap:48px; align-items:center; }
+  .slide.solo .dentro{ grid-template-columns:1fr; }
+
+  .olho{ font-family:ui-monospace,"Cascadia Code",Consolas,monospace; font-size:11px; font-weight:700;
+    letter-spacing:.2em; text-transform:uppercase; color:var(--orange); margin:0 0 10px; }
+  h1{ font-size:clamp(27px,4.2vw,44px); line-height:1.06; letter-spacing:-.025em; font-weight:800;
+    margin:0 0 14px; text-wrap:balance; }
+  .linha{ font-size:clamp(15px,1.6vw,19px); line-height:1.55; color:var(--dim); margin:0 0 18px; max-width:26em; }
+  .linha b{ color:var(--on); }
+
+  .blocos{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+  .blocos.estreito{ max-width:30em; }
+  .bloco{ background:linear-gradient(170deg,var(--surface-hi),var(--surface));
+    border:1px solid var(--border); border-radius:15px; padding:14px 15px 16px; }
+  .bloco h4{ font-size:15px; margin:0 0 5px; font-weight:800; letter-spacing:-.01em; }
+  .bloco p{ font-size:13.5px; line-height:1.5; color:var(--muted); margin:0; }
+  .bloco.destaque{ border-color:rgba(253,104,2,.5); background:linear-gradient(170deg,rgba(253,104,2,.14),var(--surface)); }
+
+  .fonte{ margin-top:16px; font-size:11.5px; line-height:1.55; color:rgba(255,255,255,.4);
+    border-left:2px solid rgba(188,249,9,.45); padding-left:11px; max-width:34em; }
+  .fonte b{ color:rgba(188,249,9,.85); font-weight:700; }
+
+  /* ── o app ao vivo dentro do slide ──────────────────────────────── */
+  .palco{ display:flex; flex-direction:column; align-items:center; gap:8px; min-width:0; }
+
+  /* As telas lado a lado: uma fileira que desliza com o dedo e encaixa. */
+  .tiras{ display:flex; gap:16px; overflow-x:auto; overscroll-behavior-x:contain;
+    scroll-snap-type:x mandatory; scroll-behavior:smooth; scrollbar-width:none;
+    padding:4px 2px 6px; max-width:100%; }
+  .tiras::-webkit-scrollbar{ display:none; }
+  .tira{ flex:none; scroll-snap-align:center; display:flex; flex-direction:column;
+    align-items:center; gap:7px; transition:opacity .25s, transform .25s; cursor:pointer; }
+  .tira:not(.ativa){ opacity:.5; transform:scale(.92); }
+  .tira .rotulo{ font-size:10.5px; letter-spacing:.12em; text-transform:uppercase;
+    color:rgba(255,255,255,.45); font-family:ui-monospace,Consolas,monospace; white-space:nowrap; }
+  .tira.ativa .rotulo{ color:var(--orange); }
+  .pontinhos{ display:flex; gap:6px; }
+  .pontinhos i{ width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,.25); cursor:pointer; }
+  .pontinhos i.aqui{ width:18px; border-radius:3px; background:var(--orange); }
+  .pontinhos[hidden]{ display:none; }
+  .explicacao{ margin-top:10px; background:linear-gradient(170deg,var(--surface-hi),var(--surface));
+    border:1px solid var(--border); border-left:3px solid var(--orange); border-radius:14px;
+    padding:12px 15px; max-width:420px; font-size:13.5px; line-height:1.5; color:var(--dim); }
+  .explicacao b{ color:var(--on); display:block; font-size:11px; letter-spacing:.14em;
+    text-transform:uppercase; margin-bottom:5px; font-family:ui-monospace,Consolas,monospace;
+    color:var(--orange); }
+  .voltar-tela{ background:none; border:0; color:var(--orange); font-family:inherit;
+    font-size:11px; cursor:pointer; padding:0 0 0 8px; }
+  .voltar-tela[hidden]{ display:none; }
+  .aparelho{ position:relative; border-radius:26px; overflow:hidden; border:1px solid rgba(255,255,255,.15);
+    box-shadow:0 26px 56px rgba(0,0,0,.62), 0 0 0 6px rgba(255,255,255,.025); background:#0A0A0C; }
+  .aparelho img{ display:block; height:min(56vh,455px); width:auto; }
+  .area{ position:absolute; border:0; background:transparent; cursor:pointer; padding:0; }
+  /* O ponto que mostra ONDE tocar. Sem ele, numa tela de toque (sem mouse,
+     sem hover) a demonstracao parece uma figura parada. */
+  .area .marca{ position:absolute; left:50%; top:50%; width:11px; height:11px;
+    margin:-5.5px 0 0 -5.5px; border-radius:50%; background:rgba(255,255,255,.42);
+    box-shadow:0 0 0 3px rgba(255,255,255,.10); pointer-events:none; }
+  .area .marca.leva{ background:var(--orange); box-shadow:0 0 0 5px rgba(253,104,2,.22);
+    animation:pulsa 2.1s ease-in-out infinite; }
+  @keyframes pulsa{ 0%,100%{ transform:scale(1); opacity:.95 } 50%{ transform:scale(1.3); opacity:1 } }
+  .tira:not(.ativa) .marca{ display:none; }
+  .area:active::after{ opacity:1; }
+  .area::after{ content:""; position:absolute; inset:0; border-radius:10px;
+    background:rgba(253,104,2,.24); border:1.5px solid rgba(253,134,53,.85); opacity:0; transition:opacity .2s; }
+  .area:hover::after{ opacity:1; }
+  .aparelho.pisca .area::after{ animation:pisca 1.4s ease-in-out 2; }
+  @keyframes pisca{ 0%,100%{ opacity:0 } 50%{ opacity:.6 } }
+  .rolar{ position:absolute; right:9px; bottom:12.5%; width:34px; height:34px; border-radius:50%;
+    background:rgba(253,104,2,.95); color:#0A0A0B; border:0; font-size:16px; font-weight:800; cursor:pointer;
+    box-shadow:0 8px 18px rgba(0,0,0,.5); z-index:3; font-family:inherit;
+    display:flex; align-items:center; justify-content:center; }
+  .rolar[hidden]{ display:none; }
+  .rolar.cima{ bottom:auto; top:10.5%; }
+  .legenda{ font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:rgba(255,255,255,.4);
+    font-family:ui-monospace,Consolas,monospace; display:flex; align-items:center; gap:10px; }
+  .legenda button{ background:rgba(255,255,255,.07); border:1px solid var(--border); color:var(--dim);
+    border-radius:999px; padding:4px 10px; font-size:11px; cursor:pointer; font-family:inherit; }
+  .legenda button[hidden]{ display:none; }
+
+  .capa{ display:flex; flex-direction:column; justify-content:center; }
+  .capa .chamada{ font-family:ui-monospace,"Cascadia Code",Consolas,monospace; font-size:clamp(12px,1.25vw,14px);
+    font-weight:700; letter-spacing:.17em; text-transform:uppercase; color:var(--lime); margin:0 0 14px; }
+  .capa img.marca{ height:clamp(50px,6.2vw,82px); width:auto; align-self:flex-start; margin-bottom:24px; }
+  .capa h1{ font-size:clamp(30px,5vw,54px); }
+  .capa .sub{ font-size:clamp(15px,1.7vw,20px); line-height:1.55; color:var(--dim); max-width:26em; margin:0 0 24px; }
+  .botao{ display:inline-flex; align-items:center; gap:9px; background:linear-gradient(135deg,var(--orange-hi),var(--orange));
+    color:#0A0A0B; border:0; border-radius:999px; padding:13px 22px; font-size:15px; font-weight:800;
+    cursor:pointer; font-family:inherit; box-shadow:0 14px 30px rgba(253,104,2,.3); }
+  .assinatura{ margin-top:20px; font-family:ui-monospace,Consolas,monospace; font-size:11.5px;
+    letter-spacing:.14em; text-transform:uppercase; color:rgba(255,255,255,.42); }
+  .fim{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+  .fim img{ height:clamp(62px,7.5vw,100px); margin-bottom:20px; }
+  .fim h1{ font-size:clamp(26px,4.4vw,42px); }
+  .fim p{ font-size:clamp(14.5px,1.6vw,18px); color:var(--dim); max-width:28em; line-height:1.6; margin:0; }
+
+  .sim{ display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
+  .escolhas{ display:flex; flex-direction:column; gap:8px; }
+  .escolha{ text-align:left; background:var(--surface); color:var(--dim); border:1px solid var(--border);
+    border-radius:12px; padding:12px 14px; font-size:14px; font-family:inherit; cursor:pointer; line-height:1.4;
+    transition:all .15s; }
+  .escolha:hover{ border-color:rgba(253,104,2,.55); color:var(--on); }
+  .escolha.ativa{ background:linear-gradient(135deg,rgba(253,104,2,.2),rgba(253,104,2,.06));
+    border-color:var(--orange); color:var(--on); font-weight:700; }
+  .cartao{ background:linear-gradient(170deg,var(--surface-hi),var(--surface)); border:1px solid var(--border);
+    border-left:3px solid var(--orange); border-radius:15px; padding:18px 20px; }
+  .cartao .selo{ font-family:ui-monospace,Consolas,monospace; font-size:10.5px; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--orange); margin-bottom:10px; }
+  .cartao .fala{ font-size:clamp(14.5px,1.5vw,17.5px); line-height:1.5; margin:0 0 14px; }
+  .cartao .efeito{ font-size:12.5px; color:var(--muted); border-top:1px solid var(--border); padding-top:12px;
+    line-height:1.5; }
+  .cartao .efeito b{ color:var(--lime); font-weight:700; }
+  .cartao.atencao{ border-left-color:var(--amarelo); } .cartao.atencao .selo{ color:var(--amarelo); }
+  .cartao.escolha-sua{ border-left-color:var(--lime); } .cartao.escolha-sua .selo{ color:var(--lime); }
+
+  .barra{ position:fixed; left:0; right:0; bottom:0; height:56px; z-index:30;
+    display:flex; align-items:center; justify-content:center; gap:14px;
+    background:linear-gradient(180deg,rgba(10,10,12,0),rgba(10,10,12,.93) 45%); }
+  .barra button{ background:rgba(255,255,255,.06); color:var(--on); border:1px solid var(--border);
+    width:37px; height:37px; border-radius:50%; font-size:16px; cursor:pointer; font-family:inherit;
+    display:flex; align-items:center; justify-content:center; }
+  .barra button:hover{ background:rgba(255,255,255,.12); }
+  .barra button[disabled]{ opacity:.3; cursor:default; }
+  .pontos{ display:flex; gap:6px; align-items:center; }
+  .pontos i{ width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.22); cursor:pointer; transition:all .2s; }
+  .pontos i.aqui{ width:20px; border-radius:4px; background:var(--orange); }
+  .conta{ position:fixed; right:15px; bottom:18px; font-family:ui-monospace,Consolas,monospace;
+    font-size:11.5px; color:rgba(255,255,255,.38); z-index:31; }
+
+  .recado{ position:fixed; left:50%; bottom:76px; transform:translateX(-50%) translateY(14px);
+    background:#1E1E25; border:1px solid var(--border); color:var(--on); padding:12px 18px;
+    border-radius:14px; font-size:13.5px; line-height:1.45; max-width:min(420px,86vw); text-align:center;
+    opacity:0; transition:all .25s; pointer-events:none; z-index:60; box-shadow:0 14px 34px rgba(0,0,0,.6); }
+  .recado.vendo{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  .so-impresso, .so-estatico{ display:none; }
+
+  /* ── o mesmo conteúdo, impresso em 16:9 ───────────────────────────── */
+  @media print{
+    @page{ size:13.333in 7.5in; margin:0; }
+    /* line-height 0 no body: sem isso, o espaço em branco entre </main> e a
+       barra vira uma linha de texto vazia e o PDF ganha uma página a mais. */
+    html,body{ height:auto; display:block; background:#0A0A0C; line-height:0; }
+    .deck{ line-height:normal; }
+    .progresso,.barra,.conta,.recado,.rolar,.legenda,.botao,.assinatura,.sim,.so-tela{ display:none !important; }
+    .so-estatico{ display:block !important; }
+    .deck{ display:block; overflow:visible; }
+    /* 100vh/100vw e não 7.5in/13.333in: no papel a unidade de viewport É a
+       página, e o arredondamento da polegada empurrava uma página em branco. */
+    /* 1px a menos que a página: com a altura exata, o arredondamento do
+       Chrome empurrava uma folha em branco para o fim do PDF. */
+    .slide{ width:100vw; height:calc(100vh - 1px); min-width:0; padding:0.5in 0.62in; overflow:hidden;
+      display:flex; align-items:center; }
+    /* a quebra vai ANTES de cada slide a partir do segundo: com `break-after`
+       em todos, o Chrome fechava uma folha em branco no fim do PDF. */
+    .slide + .slide{ page-break-before:always; break-before:page; }
+    .dentro{ max-width:none; width:100%; min-height:0; gap:0.5in; }
+    .aparelho img{ height:4.6in; }
+    /* no papel as telas ficam todas acesas e lado a lado, sem rolagem */
+    .tiras{ overflow:visible !important; gap:0.2in; }
+    .tira{ opacity:1 !important; transform:none !important; }
+    .pontinhos, .marca, .explicacao{ display:none !important; }
+    .area{ display:none; }
+    .capa img.marca{ height:0.95in; }
+    .fim img{ height:1.1in; }
+    /* três colunas no papel: em duas, os seis pares estouravam a página e o
+       PDF ganhava uma folha a mais. */
+    .so-impresso{ display:grid !important; grid-template-columns:repeat(3,1fr); gap:9px; }
+    .impresso-par{ background:linear-gradient(170deg,var(--surface-hi),var(--surface));
+      border:1px solid var(--border); border-left:3px solid var(--orange); border-radius:13px; padding:12px 14px; }
+    .impresso-par .q{ font-size:11.5px; color:var(--orange); font-weight:800; margin-bottom:5px;
+      font-family:ui-monospace,Consolas,monospace; }
+    .impresso-par .a{ font-size:12px; line-height:1.38; margin:0 0 6px; }
+    .impresso-par .e{ font-size:11px; line-height:1.38; color:var(--muted); margin:0; }
+  }
+
+  @media (max-width:900px){
+    .dentro{ grid-template-columns:1fr; gap:20px; align-content:start; }
+    .slide{ padding:32px 20px 88px; }
+    .palco{ order:-1; }
+    .aparelho img{ height:min(42vh,370px); }
+    .sim{ grid-template-columns:1fr; gap:12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progresso"><i id="fita"></i></div>
+
+<main class="deck" id="deck">
+
+  <!-- 1 ─ capa -->
+  <section class="slide">
+    <div class="dentro">
+      <div class="capa">
+        <img class="marca" src="marca.png" alt="WYMov">
+        <p class="chamada">O seu personal IA dentro do seu celular</p>
+        <h1>O treino que enxerga a sua execução</h1>
+        <p class="sub">Musculação séria, montada por IA, conduzida por voz humana e corrigida
+           pela câmera do próprio celular.</p>
+        <button class="botao" data-ir="1">Começar ›</button>
+        <div class="assinatura">— as telas desta apresentação são do app, e funcionam</div>
+      </div>
+      <div class="palco">
+        <div class="tiras" data-telas="inicio"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 ─ pilares -->
+  <section class="slide solo">
+    <div class="dentro">
+      <div>
+        <p class="olho">O produto</p>
+        <h1>Quatro funções que nenhum app brasileiro entrega junto</h1>
+        <div class="blocos">
+          <div class="bloco destaque"><h4>A IA monta a planilha</h4>
+            <p>Por objetivo, experiência, equipamento e lesão — e remonta a cada bloco.</p></div>
+          <div class="bloco destaque"><h4>A câmera corrige</h4>
+            <p>33 pontos do corpo, quadro a quadro, dentro do aparelho —
+               já são <b>126 exercícios com correção</b>.</p></div>
+          <div class="bloco destaque"><h4>A voz conduz</h4>
+            <p>Treinador em português no fone, sem olhar para a tela.</p></div>
+          <div class="bloco destaque"><h4>O Personal acompanha</h4>
+            <p>Check-in toda semana, e a ficha seguinte sai ajustada.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 ─ início -->
+  <section class="slide">
+    <div class="dentro">
+      <div>
+        <p class="olho">Passo 1 · Tela inicial</p>
+        <h1>O dia já vem decidido</h1>
+        <p class="linha">O aluno abre o app e <b>não precisa procurar nada: já tem na mão</b>
+           o treino de hoje, montado, com duração e semana do bloco.
+           <b>Toque na tela ao lado.</b></p>
+      </div>
+      <div class="palco">
+        <div class="tiras" data-telas="inicio,treino-hoje"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 ─ mapa de fadiga -->
+  <section class="slide">
+    <div class="dentro">
+      <div>
+        <p class="olho">Passo 2 · Mapa de fadiga</p>
+        <h1>Qual músculo ainda está fadigado</h1>
+        <p class="linha">O mapa mostra, grupo por grupo, <b>o que o treino fadigou e o que já
+           se recuperou</b> — com as horas que faltam. <b>Toque nos músculos.</b></p>
+        <div class="blocos estreito" style="margin-bottom:4px">
+          <div class="bloco"><h4><span style="color:#EF4444">●</span> Carga alta</h4>
+            <p>Peito 38 h · tríceps 30 h para voltar ao pleno.</p></div>
+          <div class="bloco"><h4><span style="color:#FACC15">●</span> Recuperando</h4>
+            <p>Quadríceps 12 h: dá para treinar, com carga menor.</p></div>
+          <div class="bloco"><h4><span style="color:#22C55E">●</span> Pronto</h4>
+            <p>Costas, ombro, bíceps, core, glúteo e panturrilha.</p></div>
+        </div>
+        <p class="fonte"><b>Embasamento 100% teórico.</b> O app não mede o corpo do aluno: ele
+           estima. Cada grupo tem uma janela de recuperação tirada da literatura, com decaimento
+           exponencial da capacidade funcional, e serve como indicador de prontidão — nunca como
+           bloqueio.<br>
+           <b>Fontes:</b> revisão 2017–2025 — Morán-Navarro 2017 · Belcher 2019 · Chen 2019 ·
+           Refalo 2023 · Damas 2016 · Pelland 2025.</p>
+      </div>
+      <div class="palco">
+        <div class="tiras" data-telas="fadiga"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 ─ anamnese -->
+  <section class="slide">
+    <div class="dentro">
+      <div>
+        <p class="olho">Passo 3 · Anamnese</p>
+        <h1>Sete perguntas, uma vez só</h1>
+        <p class="linha">É o que faz a ficha ser dele e não de qualquer um: objetivo, experiência,
+           equipamento e lesões. <b>Toque em "Começar".</b></p>
+      </div>
+      <div class="palco">
+        <div class="tiras" data-telas="anamnese-welcome,anamnese-wizard"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 ─ treino de hoje -->
+  <section class="slide">
+    <div class="dentro">
+      <div>
+        <p class="olho">Passo 4 · A ficha</p>
+        <h1>A planilha sai pronta, bloco a bloco</h1>
+        <p class="linha">O que um personal leva uma hora para escrever, com o catálogo inteiro
+           na mão. A <b>periodização vem pensada ponto a ponto</b>, pelo nível e pela experiência
+           do aluno — o bloco de oito semanas de um iniciante não é o de um avançado.
+           <b>Toque nos blocos do dia.</b></p>
+      </div>
+      <div class="palco">
+        <div class="tiras" data-telas="treino-hoje,treino-hoje-baixo"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 ─ câmera e voz -->
+  <section class="slide">
+    <div class="dentro">
+      <div>
+        <p class="olho">Passo 5 · Câmera e voz</p>
+        <h1>A série que se corrige sozinha</h1>
+        <p class="linha">O celular lê <b>33 pontos do corpo</b> a cada quadro: conta as repetições,
+           <b>avisa na hora quando uma sai incompleta</b>, fecha a série quando o movimento acaba
+           e <b>preenche a ficha com repetições e carga</b>. <b>Toque nos números.</b></p>
+        <div class="blocos estreito">
+          <div class="bloco"><h4>Nada sai do aparelho</h4>
+            <p>O vídeo não é gravado nem enviado: os pontos são lidos e descartados.</p></div>
+          <div class="bloco"><h4>Bruno ou Luiza</h4>
+            <p>Voz humana em PT-BR; o aluno escolhe o treinador e desliga quando quiser.</p></div>
+        </div>
+      </div>
+      <div class="palco">
+        <div class="tiras" data-telas="camera-resumo"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 ─ personal -->
+  <section class="slide solo">
+    <div class="dentro">
+      <div>
+        <p class="olho">Passo 6 · Personal WYMov</p>
+        <h1>Um treinador que lê a sua semana</h1>
+        <p class="linha">Ele <b>pergunta</b>, <b>decide com o aluno</b> e, na semana seguinte,
+           <b>conta o que fez</b> com a resposta dele.</p>
+        <div class="blocos">
+          <div class="bloco destaque"><h4>Check-in de um minuto</h4>
+            <p>Onze perguntas por semana: sono, dor, disposição, estresse, cargas, faltas e
+               exercícios que travaram.</p></div>
+          <div class="bloco destaque"><h4>Ele fecha o ciclo</h4>
+            <p>"Você achou as cargas leves — subimos a carga esta semana." O aluno vê que foi ouvido.</p></div>
+          <div class="bloco destaque"><h4>Descanso por treino</h4>
+            <p>A semana do bloco anda pelo que foi treinado. Faltou? O bloco espera.</p></div>
+          <div class="bloco destaque"><h4>Nunca decide sozinho</h4>
+            <p>Detecta a fadiga e <b>sugere</b> o descanso — só aplica se o aluno aceitar.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 ─ personal interativo -->
+  <section class="slide solo">
+    <div class="dentro">
+      <div>
+        <p class="olho">Passo 6 · Experimente</p>
+        <h1>Responda o check‑in e veja o que ele faz</h1>
+        <p class="linha so-tela">Toque numa resposta: a frase é a que o app escreve, e embaixo
+           está o que ele muda na ficha.</p>
+        <p class="linha so-estatico">O que o aluno responde, a frase que o app escreve de volta e
+           o que muda na ficha dele.</p>
+        <div class="so-impresso" id="paraImpresso"></div>
+        <div class="sim">
+          <div class="escolhas" id="escolhas"></div>
+          <div class="cartao" id="cartao">
+            <div class="selo">Da sua semana passada</div>
+            <p class="fala" id="fala">Escolha uma resposta ao lado.</p>
+            <div class="efeito" id="efeito" style="display:none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 ─ aba mais -->
+  <section class="slide">
+    <div class="dentro">
+      <div>
+        <p class="olho">Passo 7 · O hub</p>
+        <h1>O suporte por trás do treino do dia</h1>
+        <p class="linha">Biblioteca com quase 2.000 exercícios em vídeo, treinos salvos, timers
+           de WOD, avaliação física e cardio. <b>Toque nos atalhos.</b></p>
+      </div>
+      <div class="palco">
+        <div class="tiras" data-telas="menu-mais,menu-mais-baixo"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 ─ sem internet -->
+  <section class="slide">
+    <div class="dentro">
+      <div>
+        <p class="olho">Passo 8 · Academia de verdade</p>
+        <h1>Sinal ruim não para o treino</h1>
+        <p class="linha">A ficha do dia fica no aparelho e o que foi feito sobe depois.
+           Câmera e voz rodam no celular, sem rede. <b>Toque na faixa.</b></p>
+      </div>
+      <div class="palco">
+        <div class="tiras" data-telas="offline"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 ─ fecho -->
+  <section class="slide solo">
+    <div class="dentro">
+      <div class="fim">
+        <img src="marca-sem-tag.png" alt="WYMov">
+        <h1>Watch Your Movement</h1>
+        <p>Musculação séria, em português, com a tecnologia que corrige o movimento dentro
+           do bolso do aluno.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<nav class="barra">
+  <button id="ant" aria-label="Anterior">‹</button>
+  <div class="pontos" id="pontos"></div>
+  <button id="prox" aria-label="Próximo">›</button>
+</nav>
+<div class="conta" id="conta">01 / 12</div>
+<div class="recado" id="recado"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── navegação ─────────────────────────────────────────────────────
+  var deck = document.getElementById('deck');
+  var slides = Array.prototype.slice.call(deck.querySelectorAll('.slide'));
+  var pontos = document.getElementById('pontos');
+  var conta = document.getElementById('conta');
+  var fita = document.getElementById('fita');
+  var ant = document.getElementById('ant');
+  var prox = document.getElementById('prox');
+  var atual = 0;
+
+  slides.forEach(function (s, i) {
+    var p = document.createElement('i');
+    p.addEventListener('click', function () { irPara(i); });
+    pontos.appendChild(p);
+  });
+
+  function irPara(i) {
+    i = Math.max(0, Math.min(slides.length - 1, i));
+    slides[i].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }
+
+  function marcar() {
+    atual = Math.round(deck.scrollLeft / deck.clientWidth);
+    Array.prototype.forEach.call(pontos.children, function (p, k) { p.classList.toggle('aqui', k === atual); });
+    conta.textContent = ('0' + (atual + 1)).slice(-2) + ' / ' + slides.length;
+    fita.style.width = ((atual + 1) / slides.length * 100) + '%';
+    ant.disabled = atual === 0;
+    prox.disabled = atual === slides.length - 1;
+  }
+
+  deck.addEventListener('scroll', function () {
+    window.clearTimeout(deck._t);
+    deck._t = window.setTimeout(marcar, 60);
+  });
+  ant.addEventListener('click', function () { irPara(atual - 1); });
+  prox.addEventListener('click', function () { irPara(atual + 1); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { irPara(atual + 1); e.preventDefault(); }
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') { irPara(atual - 1); e.preventDefault(); }
+    if (e.key === 'Home') irPara(0);
+    if (e.key === 'End') irPara(slides.length - 1);
+  });
+  document.querySelectorAll('[data-ir]').forEach(function (b) {
+    b.addEventListener('click', function () { irPara(parseInt(b.dataset.ir, 10)); });
+  });
+
+  // ── recado ────────────────────────────────────────────────────────
+  var recado = document.getElementById('recado');
+  function avisar(texto) {
+    recado.textContent = texto;
+    recado.classList.add('vendo');
+    window.clearTimeout(recado._t);
+    recado._t = window.setTimeout(function () { recado.classList.remove('vendo'); }, 3400);
+  }
+
+  // ── as telas, e para onde cada toque leva ───────────────────
+  // So entra aqui o que o app FAZ hoje. `ir` troca a tela do celular — e e
+  // isso que faz a demonstracao parecer o app; `aviso` e a explicacao que
+  // aparece no cartao ao lado. Quem tem os dois faz as duas coisas no toque.
+  var BARRA = [
+    { x: 0, y: 93, l: 25, a: 7, ir: 'inicio', aviso: 'Início: o treino de hoje e o mapa de fadiga.' },
+    { x: 25, y: 93, l: 25, a: 7, ir: 'treino-hoje', aviso: 'Treino: a ficha do dia, bloco a bloco.' },
+    { x: 50, y: 93, l: 25, a: 7, aviso: 'Progresso: histórico, evolução de carga e avaliação física.' },
+    { x: 75, y: 93, l: 25, a: 7, ir: 'menu-mais', aviso: 'Mais: biblioteca, timers, Personal WYMov e ajustes.' }
+  ];
+  function comBarra(areas) { return areas.concat(BARRA); }
+
+  var TELAS = {
+    'inicio': {
+      nome: 'Início', img: 'telas/inicio.jpg',
+      areas: comBarra([
+        { x: 5, y: 10, l: 90, a: 14, aviso: 'O treino de hoje, já montado: 6 exercícios, ~52 min, semana 2 do bloco de 8.' },
+        { x: 8, y: 25, l: 80, a: 9, ir: 'treino-hoje', aviso: 'Um toque e a ficha do dia abre — com vídeo, carga sugerida e a voz conduzindo.' },
+        { x: 5, y: 37, l: 90, a: 16, aviso: 'A semana: o que já foi feito e quanto falta para bater a meta.' },
+        { x: 5, y: 55, l: 43, a: 10, aviso: 'Sequência: dias seguidos de treino. É o número que segura o hábito.' },
+        { x: 52, y: 55, l: 43, a: 10, aviso: 'Volume: toneladas levantadas nos últimos sete dias.' },
+        { x: 5, y: 67, l: 90, a: 25, ir: 'fadiga', aviso: 'O mapa de fadiga: que músculo ainda está carregado e qual já voltou.' }
+      ])
+    },
+    'fadiga': {
+      nome: 'Mapa de fadiga', img: 'telas/inicio-fadiga-full.jpg',
+      areas: comBarra([
+        { x: 5, y: 2, l: 90, a: 10, ir: 'inicio', aviso: 'Voltando ao topo da tela inicial.' },
+        { x: 16, y: 52, l: 28, a: 18, aviso: 'Frente do corpo. Vermelho = fadigado; verde = recuperado e pronto para treinar.' },
+        { x: 56, y: 52, l: 28, a: 18, aviso: 'Costas. O mesmo músculo muda de cor conforme as horas passam desde o treino.' },
+        { x: 5, y: 70, l: 90, a: 5, aviso: 'Três estados: carga alta, recuperando e pronto.' },
+        { x: 5, y: 74, l: 90, a: 4, aviso: 'Peito: 38 h para voltar ao pleno. Treinou pesado ontem — a janela é de 48 a 72 h.' },
+        { x: 5, y: 78, l: 90, a: 4, aviso: 'Tríceps: 30 h. Entrou junto no treino de peito, e recupera mais rápido.' },
+        { x: 5, y: 81, l: 90, a: 4, aviso: 'Quadríceps: 12 h — amarelo. Dá para treinar, com carga menor.' },
+        { x: 5, y: 86, l: 90, a: 6, aviso: 'Pronto: costas, ombro, bíceps, antebraço, core, glúteo, adutores, panturrilha.' }
+      ])
+    },
+    'anamnese-welcome': {
+      nome: 'Boas-vindas', img: 'telas/anamnese-welcome.jpg',
+      areas: [
+        { x: 18, y: 68, l: 64, a: 7, ir: 'anamnese-wizard', aviso: 'Começando a anamnese: sete etapas, cerca de dois minutos.' }
+      ]
+    },
+    'anamnese-wizard': {
+      nome: 'Etapa 1 de 7', img: 'telas/anamnese-wizard.jpg',
+      areas: [
+        { x: 0, y: 2, l: 16, a: 7, ir: 'anamnese-welcome', aviso: 'Voltando para as boas-vindas.' },
+        { x: 5, y: 40, l: 90, a: 14, aviso: 'Cada etapa explica por que pergunta — e o que aquilo muda no treino.' },
+        { x: 66, y: 91, l: 28, a: 7, aviso: 'Próxima etapa. No fim das sete, a IA monta a ficha.' }
+      ]
+    },
+    'treino-hoje': {
+      nome: 'Treino de hoje', img: 'telas/treino-hoje.jpg', baixo: 'treino-hoje-baixo',
+      areas: comBarra([
+        { x: 0, y: 2, l: 16, a: 7, ir: 'inicio', aviso: 'Voltando para o início.' },
+        { x: 4, y: 9, l: 92, a: 21, aviso: 'Bloco 1 — força: peito e tríceps, 6 exercícios, ~32 min.' },
+        { x: 4, y: 31, l: 92, a: 16, ir: 'camera-resumo', aviso: 'Bloco 2 — a câmera entra como parte do treino: agachamento livre com correção.' },
+        { x: 4, y: 48, l: 92, a: 15, aviso: 'Bloco 3 — cardio leve na esteira, em ritmo confortável.' }
+      ])
+    },
+    'treino-hoje-baixo': {
+      nome: 'O que o bloco rendeu', img: 'telas/treino-hoje-baixo.jpg', cima: 'treino-hoje',
+      areas: comBarra([
+        { x: 4, y: 2, l: 92, a: 8, ir: 'treino-hoje', aviso: 'Voltando ao topo da ficha.' },
+        { x: 4, y: 60, l: 44, a: 18, aviso: '12 treinos no bloco, +2 na semana.' },
+        { x: 50, y: 60, l: 46, a: 18, aviso: '5.240 kg de carga total, +8% no mês.' },
+        { x: 4, y: 80, l: 92, a: 12, aviso: 'Sequência atual: 4 semanas — a melhor marca até aqui.' }
+      ])
+    },
+    'camera-resumo': {
+      nome: 'Resumo da série', img: 'telas/camera-resumo.jpg',
+      areas: comBarra([
+        { x: 5, y: 10, l: 28, a: 10, aviso: '5 repetições VÁLIDAS: amplitude completa, do começo ao fim.' },
+        { x: 34, y: 10, l: 28, a: 10, aviso: '4 PARCIAIS: contaram também, e o app avisou na hora que o movimento encurtou.' },
+        { x: 63, y: 10, l: 32, a: 10, aviso: '50% de execução: metade da série saiu no padrão combinado.' },
+        { x: 5, y: 21, l: 90, a: 11, aviso: 'Repetição a repetição: verde é válida, amarelo é parcial, vermelho é falha.' },
+        { x: 5, y: 36, l: 90, a: 16, aviso: 'O que melhorar, em português — e foi isso que a voz falou no fone durante a série.' },
+        { x: 9, y: 82, l: 38, a: 8, aviso: 'Refazer: volta para a câmera com a série zerada.' },
+        { x: 52, y: 82, l: 40, a: 8, ir: 'treino-hoje', aviso: 'Série salva: a ficha já vai preenchida, com repetições e carga.' }
+      ])
+    },
+    'menu-mais': {
+      nome: 'Aba Mais', img: 'telas/menu-mais.jpg', baixo: 'menu-mais-baixo',
+      areas: comBarra([
+        { x: 5, y: 21, l: 43, a: 13, aviso: 'Gerar treino com IA: a ficha inteira montada pelo perfil do aluno.' },
+        { x: 52, y: 21, l: 43, a: 13, ir: 'camera-resumo', aviso: 'Treinar com câmera: escolher um exercício e deixar o celular contar.' },
+        { x: 5, y: 34, l: 43, a: 11, aviso: 'Treinos salvos: as fichas que o aluno guardou para repetir.' },
+        { x: 52, y: 34, l: 43, a: 11, aviso: 'Timers e WOD: cronômetros para treino livre.' },
+        { x: 5, y: 45, l: 90, a: 6, aviso: 'A biblioteca inteira: quase 2.000 exercícios, com vídeo em cada um.' },
+        { x: 5, y: 51, l: 90, a: 6, aviso: 'Treino extra: registrar o que foi feito fora do app.' }
+      ])
+    },
+    'menu-mais-baixo': {
+      nome: 'Aba Mais · acompanhar', img: 'telas/menu-mais-baixo.jpg', cima: 'menu-mais',
+      areas: comBarra([
+        { x: 5, y: 63, l: 90, a: 6, aviso: 'Minha evolução: carga e volume ao longo das semanas.' },
+        { x: 5, y: 69, l: 90, a: 6, aviso: 'Histórico: cada sessão e cada série, exercício por exercício.' },
+        { x: 5, y: 75, l: 90, a: 6, aviso: 'Avaliação física: medidas e fotos de acompanhamento.' },
+        { x: 5, y: 81, l: 90, a: 6, aviso: 'Cardio e corrida: distância, ritmo e evolução.' },
+        { x: 5, y: 87, l: 90, a: 6, aviso: 'Personal WYMov: o check-in da semana e os insights do bloco.' }
+      ])
+    },
+    'offline': {
+      nome: 'Sem internet', img: 'telas/inicio-offline.jpg',
+      areas: comBarra([
+        { x: 0, y: 0, l: 100, a: 4, aviso: '"Sem conexão · mostrando dados salvos": o app avisa em vez de deixar adivinhando.' },
+        { x: 5, y: 10, l: 90, a: 16, aviso: 'A ficha do dia estava salva no aparelho — o treino continua servindo.' },
+        { x: 8, y: 27, l: 80, a: 9, ir: 'treino-hoje', aviso: 'A série roda normal: o que foi feito entra numa fila e sobe quando o sinal voltar.' }
+      ])
+    }
+  };
+
+  // ── o app ao vivo, em cada slide ─────────────────────────
+  // Cada celular da fileira e um aparelho de verdade: toca e a tela troca.
+  function montarTiras(caixa) {
+    var nomes = (caixa.dataset.telas || '').split(',').filter(Boolean);
+    var pontinhos = document.createElement('div');
+    pontinhos.className = 'pontinhos';
+    pontinhos.hidden = nomes.length < 2;
+
+    var cartao = document.createElement('div');
+    cartao.className = 'explicacao';
+    cartao.innerHTML = '<b>toque na tela</b>';
+    var texto = document.createElement('span');
+    texto.textContent = 'Os pontos laranja levam para outra tela do app; os brancos explicam o que está ali.';
+    cartao.appendChild(texto);
+
+    function explicar(titulo, frase) {
+      cartao.firstChild.textContent = titulo;
+      texto.textContent = frase;
+    }
+
+    nomes.forEach(function (chave, i) {
+      var tira = document.createElement('div');
+      tira.className = 'tira' + (i === 0 ? ' ativa' : '');
+      var aparelho = document.createElement('div');
+      aparelho.className = 'aparelho';
+      var img = document.createElement('img');
+      aparelho.appendChild(img);
+      var rotulo = document.createElement('div');
+      rotulo.className = 'rotulo';
+      var nomeDaTela = document.createElement('span');
+      var voltar = document.createElement('button');
+      voltar.className = 'voltar-tela';
+      voltar.textContent = '↺ voltar';
+      voltar.hidden = true;
+      rotulo.appendChild(nomeDaTela);
+      rotulo.appendChild(voltar);
+      tira.appendChild(aparelho);
+      tira.appendChild(rotulo);
+      caixa.appendChild(tira);
+
+      function desenhar(nomeDaChave) {
+        var tela = TELAS[nomeDaChave];
+        if (!tela) return;
+        tira._agora = nomeDaChave;
+        img.src = tela.img;
+        img.alt = tela.nome;
+        nomeDaTela.textContent = tela.nome;
+        voltar.hidden = nomeDaChave === chave;
+        Array.prototype.slice.call(aparelho.querySelectorAll('.area')).forEach(function (a) { a.remove(); });
+        (tela.areas || []).forEach(function (a) {
+          var b = document.createElement('button');
+          b.className = 'area';
+          b.style.left = a.x + '%'; b.style.top = a.y + '%';
+          b.style.width = a.l + '%'; b.style.height = a.a + '%';
+          var marca = document.createElement('span');
+          marca.className = 'marca' + (a.ir ? ' leva' : '');
+          b.appendChild(marca);
+          b.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (!tira.classList.contains('ativa')) { focar(i); return; }
+            if (a.aviso) explicar(tela.nome, a.aviso);
+            if (a.ir) desenhar(a.ir);
+          });
+          aparelho.appendChild(b);
+        });
+      }
+
+      voltar.addEventListener('click', function (e) { e.stopPropagation(); desenhar(chave); });
+      tira.addEventListener('click', function () { focar(i); });
+      desenhar(chave);
+
+      var ponto = document.createElement('i');
+      if (i === 0) ponto.className = 'aqui';
+      ponto.addEventListener('click', function () { focar(i); });
+      pontinhos.appendChild(ponto);
+    });
+
+    function focar(i) {
+      var tiras = caixa.querySelectorAll('.tira');
+      if (!tiras[i]) return;
+      Array.prototype.forEach.call(tiras, function (e, k) { e.classList.toggle('ativa', k === i); });
+      Array.prototype.forEach.call(pontinhos.children, function (e, k) { e.classList.toggle('aqui', k === i); });
+      // scrollIntoView arrastaria TAMBEM o deck (o slide trocaria sozinho).
+      var alvo = tiras[i].offsetLeft - (caixa.clientWidth - tiras[i].offsetWidth) / 2;
+      caixa.scrollTo({ left: Math.max(0, alvo), behavior: 'smooth' });
+    }
+
+    caixa.addEventListener('scroll', function () {
+      window.clearTimeout(caixa._t);
+      caixa._t = window.setTimeout(function () {
+        var tiras = caixa.querySelectorAll('.tira');
+        var meio = caixa.scrollLeft + caixa.clientWidth / 2;
+        var melhor = 0, dist = Infinity;
+        Array.prototype.forEach.call(tiras, function (e, k) {
+          var c = e.offsetLeft + e.offsetWidth / 2;
+          if (Math.abs(c - meio) < dist) { dist = Math.abs(c - meio); melhor = k; }
+        });
+        Array.prototype.forEach.call(tiras, function (e, k) { e.classList.toggle('ativa', k === melhor); });
+        Array.prototype.forEach.call(pontinhos.children, function (e, k) { e.classList.toggle('aqui', k === melhor); });
+      }, 90);
+    });
+
+    caixa.parentNode.insertBefore(pontinhos, caixa.nextSibling);
+    // O cartao fica JUNTO do celular (inclusive no telefone, onde a tela vai
+    // para cima e o texto para baixo): a resposta tem de aparecer onde o dedo
+    // acabou de tocar.
+    caixa.parentNode.insertBefore(cartao, pontinhos.nextSibling);
+  }
+
+  document.querySelectorAll('.tiras').forEach(montarTiras);
+
+  // ── simulador do Personal ─────────────────────────────────────────
+  // As falas são as do app (last_week_loop.dart) e o efeito é a regra por trás.
+  var RESPOSTAS = [
+    { pergunta: 'As cargas pareceram leves', selo: 'Da sua semana passada',
+      fala: '“Você achou as cargas leves — subimos a carga esta semana para te desafiar.”',
+      efeito: 'A progressão acelera: ele sugere subir de carga mais cedo.', tom: '' },
+    { pergunta: 'Foi puxado, mas eu segui firme', selo: 'Da sua semana passada',
+      fala: '“Você reportou treino puxado e seguiu firme — seguramos a progressão para consolidar.”',
+      efeito: 'A rampa de carga para de subir por uma semana, em vez de empilhar fadiga.', tom: '' },
+    { pergunta: 'Senti dor no ombro num exercício', selo: 'Cuidado',
+      fala: '“Você relatou incômodo articular — fique de olho; se persistir, vamos trocar o exercício.”',
+      efeito: 'O exercício pode ser travado na hora — e o app evita os que carregam aquela região.', tom: 'atencao' },
+    { pergunta: 'A semana fora da academia foi pesada', selo: 'Você escolhe',
+      fala: '“Como você quer lidar: aliviar um pouco, ou treinar para descarregar?”',
+      efeito: 'Os dois caminhos são válidos — quem decide é o aluno.', tom: 'escolha-sua' },
+    { pergunta: 'Um exercício travou', selo: 'Do seu check-in',
+      fala: '“Quando um exercício trava, eu subo um degrau de cada vez: recuo a carga e volto progredindo.”',
+      efeito: 'Micro-progressão só naquele exercício; o resto da ficha continua evoluindo.', tom: '' },
+    { pergunta: 'Dormi mal e a fadiga apareceu', selo: 'Sugestão',
+      fala: '“Seu corpo pede uma semana de alívio. Quer antecipar o descanso do bloco?”',
+      efeito: 'Só antecipa se o aluno aceitar: detectar e aplicar são separados por regra.', tom: 'atencao' }
+  ];
+
+  var escolhas = document.getElementById('escolhas');
+  var cartao = document.getElementById('cartao');
+  var fala = document.getElementById('fala');
+  var efeito = document.getElementById('efeito');
+  var selo = cartao.querySelector('.selo');
+  var paraImpresso = document.getElementById('paraImpresso');
+
+  RESPOSTAS.forEach(function (r) {
+    var b = document.createElement('button');
+    b.className = 'escolha';
+    b.textContent = r.pergunta;
+    b.addEventListener('click', function () {
+      Array.prototype.forEach.call(escolhas.children, function (o) { o.classList.remove('ativa'); });
+      b.classList.add('ativa');
+      cartao.className = 'cartao ' + r.tom;
+      selo.textContent = r.selo;
+      fala.textContent = r.fala;
+      efeito.style.display = 'block';
+      efeito.innerHTML = '';
+      var forte = document.createElement('b');
+      forte.textContent = 'o que o app faz: ';
+      var txt = document.createElement('span');
+      txt.textContent = r.efeito;
+      efeito.appendChild(forte); efeito.appendChild(txt);
+    });
+    escolhas.appendChild(b);
+
+    var par = document.createElement('div');
+    par.className = 'impresso-par';
+    var q = document.createElement('div'); q.className = 'q'; q.textContent = r.pergunta;
+    var a = document.createElement('p'); a.className = 'a'; a.textContent = r.fala;
+    var e = document.createElement('p'); e.className = 'e'; e.textContent = 'O que o app faz: ' + r.efeito;
+    par.appendChild(q); par.appendChild(a); par.appendChild(e);
+    paraImpresso.appendChild(par);
+  });
+
+  marcar();
+})();
+</script>
+</body>
+</html>
